@@ -2480,9 +2480,15 @@ class Table:
             part_f = f
 
         partitions = {}
-        # conversion of vector types is not necessary, vectors are not
-        # being passed to an arbitrary function
-        for vals, id_, md in self.iter(dense=False, axis=axis):
+        ids = self.ids(axis=axis)
+        metadata = self.metadata(axis=axis)
+        if metadata is None:
+            metadata = (None,) * len(ids)
+        # The callback needs only IDs and metadata. Keep positions instead of
+        # allocating a sparse matrix for every vector and stacking them later.
+        self._data = (self._data.tocsc() if axis == 'sample'
+                      else self._data.tocsr())
+        for position, (id_, md) in enumerate(zip(ids, metadata)):
             part = part_f(id_, md)
 
             if ignore_none and part is None:
@@ -2496,14 +2502,14 @@ class Table:
                 partitions[part] = [[], [], []]
 
             partitions[part][0].append(id_)
-            partitions[part][1].append(vals)
+            partitions[part][1].append(position)
             partitions[part][2].append(md)
 
         md = self.metadata(axis=self._invert_axis(axis))
 
-        for part, (ids, values, metadata) in partitions.items():
+        for part, (ids, positions, metadata) in partitions.items():
             if axis == 'sample':
-                data = self._conv_to_self_type(values, transpose=True)
+                data = self._data[:, positions]
                 samp_ids = ids
                 samp_md = metadata
                 obs_ids = self.ids(axis='observation')[:]
@@ -2511,13 +2517,15 @@ class Table:
                 indices = {'observation_index': self._obs_index.copy()}
 
             elif axis == 'observation':
-                data = self._conv_to_self_type(values, transpose=False)
+                data = self._data[positions, :]
                 obs_ids = ids
                 obs_md = metadata
                 samp_ids = self.ids()[:]
                 samp_md = md[:] if md is not None else None
                 indices = {'sample_index': self._sample_index.copy()}
 
+            data.sum_duplicates()
+            data.eliminate_zeros()
             tab = Table(data, obs_ids, samp_ids, obs_md, samp_md,
                         self.table_id, type=self.type, validate=False,
                         **indices)

@@ -4352,6 +4352,10 @@ class SparseTableTests(TestCase):
                             ['S2', ])}
         obs = dict(t.partition(by_dict))
         self.assertEqual(obs, exp)
+        obs_transposed = dict(t.transpose().partition(by_dict,
+                                                     axis='observation'))
+        self.assertEqual(obs_transposed,
+                         {key: value.transpose() for key, value in exp.items()})
 
     def test_partition_dict_groups_to_ids(self):
         t = Table(np.array([[0, 1, 2],
