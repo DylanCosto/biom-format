@@ -2507,9 +2507,18 @@ class Table:
 
         md = self.metadata(axis=self._invert_axis(axis))
 
-        for part, (ids, positions, metadata) in partitions.items():
+        # Capture every partition before yielding, as the original per-vector
+        # collection did. Callers can transform the source between yields.
+        for partition in partitions.values():
+            positions = partition[1]
+            data = (self._data[:, positions] if axis == 'sample'
+                    else self._data[positions, :])
+            data.sum_duplicates()
+            data.eliminate_zeros()
+            partition[1] = data
+
+        for part, (ids, data, metadata) in partitions.items():
             if axis == 'sample':
-                data = self._data[:, positions]
                 samp_ids = ids
                 samp_md = metadata
                 obs_ids = self.ids(axis='observation')[:]
@@ -2517,15 +2526,12 @@ class Table:
                 indices = {'observation_index': self._obs_index.copy()}
 
             elif axis == 'observation':
-                data = self._data[positions, :]
                 obs_ids = ids
                 obs_md = metadata
                 samp_ids = self.ids()[:]
                 samp_md = md[:] if md is not None else None
                 indices = {'sample_index': self._sample_index.copy()}
 
-            data.sum_duplicates()
-            data.eliminate_zeros()
             tab = Table(data, obs_ids, samp_ids, obs_md, samp_md,
                         self.table_id, type=self.type, validate=False,
                         **indices)
