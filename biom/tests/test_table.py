@@ -4352,6 +4352,23 @@ class SparseTableTests(TestCase):
                             ['S2', ])}
         obs = dict(t.partition(by_dict))
         self.assertEqual(obs, exp)
+        obs_transposed = dict(t.transpose().partition(by_dict,
+                                                     axis='observation'))
+        self.assertEqual(obs_transposed,
+                         {key: value.transpose() for key, value in exp.items()})
+
+        # Values are captured before the first partition is yielded, even if
+        # the source is transformed while the generator is being consumed.
+        for axis in ('sample', 'observation'):
+            source = t.copy() if axis == 'sample' else t.transpose()
+            expected = (exp if axis == 'sample' else
+                        {key: value.transpose() for key, value in exp.items()})
+            parts = source.partition(by_dict, axis=axis)
+            key, first = next(parts)
+            self.assertEqual(first, expected[key])
+            source.transform(lambda values, id_, md: values * 10)
+            key, second = next(parts)
+            self.assertEqual(second, expected[key])
 
     def test_partition_dict_groups_to_ids(self):
         t = Table(np.array([[0, 1, 2],

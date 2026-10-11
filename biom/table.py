@@ -2480,9 +2480,15 @@ class Table:
             part_f = f
 
         partitions = {}
-        # conversion of vector types is not necessary, vectors are not
-        # being passed to an arbitrary function
-        for vals, id_, md in self.iter(dense=False, axis=axis):
+        ids = self.ids(axis=axis)
+        metadata = self.metadata(axis=axis)
+        if metadata is None:
+            metadata = (None,) * len(ids)
+        # The callback needs only IDs and metadata. Keep positions instead of
+        # allocating a sparse matrix for every vector and stacking them later.
+        self._data = (self._data.tocsc() if axis == 'sample'
+                      else self._data.tocsr())
+        for position, (id_, md) in enumerate(zip(ids, metadata)):
             part = part_f(id_, md)
 
             if ignore_none and part is None:
@@ -2496,14 +2502,23 @@ class Table:
                 partitions[part] = [[], [], []]
 
             partitions[part][0].append(id_)
-            partitions[part][1].append(vals)
+            partitions[part][1].append(position)
             partitions[part][2].append(md)
 
         md = self.metadata(axis=self._invert_axis(axis))
 
-        for part, (ids, values, metadata) in partitions.items():
+        # Capture every partition before yielding, as the original per-vector
+        # collection did. Callers can transform the source between yields.
+        for partition in partitions.values():
+            positions = partition[1]
+            data = (self._data[:, positions] if axis == 'sample'
+                    else self._data[positions, :])
+            data.sum_duplicates()
+            data.eliminate_zeros()
+            partition[1] = data
+
+        for part, (ids, data, metadata) in partitions.items():
             if axis == 'sample':
-                data = self._conv_to_self_type(values, transpose=True)
                 samp_ids = ids
                 samp_md = metadata
                 obs_ids = self.ids(axis='observation')[:]
@@ -2511,7 +2526,6 @@ class Table:
                 indices = {'observation_index': self._obs_index.copy()}
 
             elif axis == 'observation':
-                data = self._conv_to_self_type(values, transpose=False)
                 obs_ids = ids
                 obs_md = metadata
                 samp_ids = self.ids()[:]
